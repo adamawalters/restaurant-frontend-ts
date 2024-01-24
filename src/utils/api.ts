@@ -1,0 +1,272 @@
+/**
+ * Defines the base URL for the API.
+ * The default values is overridden by the `API_BASE_URL` environment variable.
+ */
+import { ReservationCreate, ReservationUpdate, TableCreate } from "../types";
+import formatReservationDate from "./format-reservation-date";
+import formatReservationTime from "./format-reservation-time";
+
+const API_BASE_URL =
+  import.meta.env.VITE_APP_BASE_URL || "http://localhost:5001";
+
+
+/**
+ * Defines the default headers for these functions to work with `json-server`
+ */
+const headers = new Headers();
+headers.append("Content-Type", "application/json");
+
+/**
+ * Fetch `json` from the specified URL and handle error status codes and ignore `AbortError`s
+ *
+ * This function is NOT exported because it is not needed outside of this file.
+ *
+ * @param url
+ *  the url for the requst.
+ * @param options
+ *  any options for fetch
+ * @param onCancel
+ *  value to return if fetch call is aborted. Default value is undefined.
+ * @returns {Promise<Error|any>}
+ *  a promise that resolves to the `json` data or an error.
+ *  If the response is not in the 200 - 399 range the promise is rejected.
+ */
+async function fetchJson<T>(url: URL, options: RequestInit, onCancel: T): Promise<T> {
+  try {
+    const response = await fetch(url, options);
+
+  /*   if (response.status === 204) {
+      return;
+    } */
+
+    const payload = await response.json();
+
+    if (payload.error) {
+      return Promise.reject({ message: payload.error });
+    }
+    return payload.data;
+  } catch (error) {
+    if (error instanceof Error && error.name !== "AbortError") {
+      console.error(error.stack);
+      throw error;
+    }
+    return Promise.resolve(onCancel);
+  }
+}
+
+/**
+ * Retrieves all existing reservation.
+ * @param params
+ * The search query (date)
+ * @returns {Promise<[reservation]>}
+ *  a promise that resolves to a possibly empty array of reservation saved in the database.
+ */
+
+export async function listReservations(params: Record<string, string>, signal?: AbortSignal) {
+  const url = new URL(`${API_BASE_URL}/reservations`);
+  Object.entries(params).forEach(([key, value]) =>
+    url.searchParams.append(key, value.toString())
+  );
+  return await fetchJson(url, { headers, signal }, [])
+    .then(formatReservationDate)
+    .then(formatReservationTime);
+}
+
+/**
+ * Retrieves all existing reservation.
+ * @returns {Promise<[reservation]>}
+ *  a promise that resolves to a possibly empty array of reservation saved in the database.
+ */
+
+export async function listReservation(reservation_id: number, signal: AbortSignal) {
+  const url = new URL(`${API_BASE_URL}/reservations/${reservation_id}`);
+  return await fetchJson<ReservationUpdate>(url, { headers, signal }, [])
+    .then((reservation) => { 
+       const formattedDate = formatReservationDate(reservation)
+       return formattedDate;
+    })
+    .then((reservation) => {
+      const formattedTime = formatReservationTime(reservation)
+      return formattedTime
+    });
+}
+
+/**
+ * Creates a reservation.
+ * @param reservationForm
+ * The data to use to create the reservation
+ * @param signal
+ * The AbortController signal
+ * @returns {Promise<{reservation}>}
+ *  a promise that resolves to a reservation saved in the database with additional reservation_id, created_at, and updated_at fields.
+ */
+export async function createReservation(reservationForm: ReservationCreate) {
+  reservationForm.people = Number(reservationForm.people);
+
+  const url = new URL(`${API_BASE_URL}/reservations`);
+
+  const options = {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ data: reservationForm }),
+  };
+  let response = await fetchJson(url, options, {} as ReservationCreate);
+  response = formatReservationDate(response);
+  response = formatReservationTime(response);
+
+  return response;
+}
+
+/**
+ * Edits a reservation.
+ * @param reservationForm
+ * The data to use to create the reservation
+ * @param signal
+ * The AbortController signal
+ * @returns {Promise<{reservation}>}
+ *  a promise that resolves to a reservation saved in the database with additional reservation_id, created_at, and updated_at fields.
+ */
+export async function editReservation(reservationForm: ReservationUpdate) {
+  reservationForm.people = Number(reservationForm.people);
+
+  const url = new URL(`${API_BASE_URL}/reservations/${reservationForm.reservation_id}`);
+
+  const options = {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ data: reservationForm }),
+  };
+  let response = await fetchJson(url, options, {} as ReservationUpdate);
+
+  console.log(`Response is ${JSON.stringify(response)}`)
+  response = formatReservationDate(response);
+  response = formatReservationTime(response);
+
+  return response;
+}
+
+
+/**
+ * Creates a table.
+ * @param tableForm
+ * The data to use to create the table (an object with table_name and capacity fields)
+ * @param signal 
+ * The AbortController signal
+ * @returns {Promise<{table}>}
+ *  a promise that resolves to a table saved in the database with additional table_id, reservation_id, created_at, and updated_at fields.
+ */
+export async function createTable(tableForm: TableCreate, signal?: AbortSignal) {
+  
+  tableForm.capacity = Number(tableForm.capacity);
+  const url = new URL(`${API_BASE_URL}/tables`);
+
+  const options = {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ data: tableForm }),
+    signal,
+  };
+
+  const response = await fetchJson(url, options, {});
+
+  return response;
+}
+
+/**
+ * Lists table in database.
+ * @param signal
+ * The AbortController signal
+ * @returns {Promise<[table]>}
+ *  a promise that resolves to a possibly empty array of tables saved in the database.
+ */
+export async function listTables(signal?: AbortSignal) {
+  const url = new URL(`${API_BASE_URL}/tables`);
+  const response = await fetchJson(url, { headers, method: "GET", signal }, []);
+  return response;
+}
+
+/**
+ * Lists available table in database.
+ * @param signal
+ * The AbortController signal
+ * @returns {Promise<[table]>}
+ *  a promise that resolves to a possibly empty array of available tables saved in the database.
+ */
+export async function listAvailableTables(signal: AbortSignal) {
+  const url = new URL(`${API_BASE_URL}/tables?available=true`);
+  const response = await fetchJson(url, { headers, method: "GET", signal }, []);
+  return response;
+}
+
+/**
+ * Adds reservation to  table in database.
+ * @param table_id
+ * The table_id to which the reservation will be assigned
+ * @param reservation_id
+ * The reservation_id that will be assigned to the table
+ * @param signal
+ * The AbortController signal
+ * @returns {Promise<[table]>}
+ *  a promise that resolves to a possibly empty array of available tables saved in the database.
+ */
+export async function updateTable(table_id: number, reservation_id: number, signal?: AbortSignal) {
+  const url = new URL(`${API_BASE_URL}/tables/${table_id}/seat`);
+  const response = await fetchJson(
+    url,
+    {
+      headers,
+      method: "PUT",
+      body: JSON.stringify({
+        data: {
+          reservation_id: reservation_id
+        },
+      }),
+      signal,
+    },
+    []
+  );
+  return response;
+}
+
+/**
+ * Deletes reservation from  table in database.
+ * @param tableID
+ * The tableID to which the reservation will be assigned
+
+ * @param signal
+ * The AbortController signal
+ * @returns null
+ */
+export async function removeReservationFromTable(tableID: string, signal?: AbortSignal){
+  const url = new URL(`${API_BASE_URL}/tables/${tableID}/seat`);
+  await fetchJson(
+    url,
+    {
+      headers,
+      method: "DELETE",
+      signal,
+    },
+    []
+  );
+}
+
+export async function updateReservationStatus(reservationID: string, newStatus: string, signal?: AbortSignal) {
+  const url = new URL(`${API_BASE_URL}/reservations/${reservationID}/status/`);
+  const response = await fetchJson(
+    url,
+    {
+      headers,
+      method: "PUT",
+      body: JSON.stringify({
+        data: {
+          status : newStatus
+        },
+      }),
+      signal,
+    },
+    []
+  );
+  return response;
+}
+
+
